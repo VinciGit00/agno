@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from agno.agent import Agent
 from agno.models.base import Model
-from agno.utils.log import logger
+from agno.utils.log import logger, log_info, log_debug
 
 if TYPE_CHECKING:
     from agno.session.workflow import WorkflowSession
@@ -53,6 +53,7 @@ class WorkflowAgent(Agent):
         session: "WorkflowSession",
         execution_input: "WorkflowExecutionInput",
         session_state: Optional[Dict[str, Any]],
+        stream_intermediate_steps: bool = False,
     ) -> Callable:
         """
         Create the workflow execution tool that this agent can call.
@@ -77,7 +78,7 @@ class WorkflowAgent(Agent):
         from agno.utils.log import log_debug
         from agno.workflow.types import WorkflowExecutionInput
 
-        def run_workflow(query: str) -> str:
+        def run_workflow(query: str):
             """
             Execute the complete workflow with the given query.
             Use this tool when you need to run the workflow to answer the user's question.
@@ -86,16 +87,72 @@ class WorkflowAgent(Agent):
                 query: The input query/question to process through the workflow
 
             Returns:
-                The workflow execution result
+                The workflow execution result (str in non-streaming, generator in streaming)
             """
+            # STREAMING MODE: Return a generator that yields workflow events
+            if stream_intermediate_steps:
+                logger.info("=" * 80)
+                logger.info("⚙️ TOOL EXECUTION (STREAMING): run_workflow")
+                logger.info("=" * 80)
+                
+                # Create a new run ID for this execution
+                run_id = str(uuid4())
+                log_debug(f"🆔 Created new run ID: {run_id}")
+
+                # Create workflow run response
+                workflow_run_response = WorkflowRunOutput(
+                    run_id=run_id,
+                    input=query,
+                    session_id=session.session_id,
+                    workflow_id=workflow.id,
+                    workflow_name=workflow.name,
+                    created_at=int(datetime.now().timestamp()),
+                )
+
+                # Update the execution input with the agent's refined query
+                workflow_execution_input = WorkflowExecutionInput(
+                    input=query,
+                    additional_data=execution_input.additional_data,
+                    audio=execution_input.audio,
+                    images=execution_input.images,
+                    videos=execution_input.videos,
+                    files=execution_input.files,
+                )
+                
+                log_debug("🚀 Executing workflow with streaming...")
+
+                # Execute workflow with streaming and yield all events
+                final_content = ""
+                for event in workflow._execute_stream(
+                    session=session,
+                    execution_input=workflow_execution_input,
+                    workflow_run_response=workflow_run_response,
+                    session_state=session_state,
+                    stream_intermediate_steps=True,  # Stream all workflow events
+                ):
+                    # Yield workflow events to bubble them up through the agent
+                    yield event
+                    
+                    # Capture final content from WorkflowCompletedEvent
+                    from agno.run.workflow import WorkflowCompletedEvent
+                    if isinstance(event, WorkflowCompletedEvent):
+                        final_content = str(event.content) if event.content else ""
+                
+                logger.info("=" * 80)
+                logger.info("✅ TOOL EXECUTION COMPLETE (STREAMING): run_workflow")
+                logger.info("=" * 80)
+                
+                # The final return value becomes the tool's output
+                return final_content
+
+            # NON-STREAMING MODE: Execute synchronously
             logger.info("=" * 80)
-            logger.info(" TOOL EXECUTION: run_workflow")
-            logger.info("    ➜ Query: {query[:100]}{'...' if len(query) > 100 else ''}")
+            logger.info("⚙️ TOOL EXECUTION: run_workflow")
             logger.info("=" * 80)
 
             # Create a new run ID for this execution
             run_id = str(uuid4())
-            log_debug(f" Created new run ID: {run_id}")
+            log_debug(f"🆔 Created new run ID: {run_id}")
 
             # Create workflow run response
             workflow_run_response = WorkflowRunOutput(
@@ -118,7 +175,7 @@ class WorkflowAgent(Agent):
             )
 
             # Execute the workflow (non-streaming)
-            log_debug(" Executing workflow steps...")
+            log_debug("🚀 Executing workflow steps...")
             result = workflow._execute(
                 session=session,
                 execution_input=workflow_execution_input,
@@ -127,7 +184,7 @@ class WorkflowAgent(Agent):
             )
 
             logger.info("=" * 80)
-            logger.info(" TOOL EXECUTION COMPLETE: run_workflow")
+            logger.info("✅ TOOL EXECUTION COMPLETE: run_workflow")
             logger.info(f"    ➜ Run ID: {result.run_id}")
             logger.info(f"    ➜ Result length: {len(str(result.content)) if result.content else 0} chars")
             logger.info("=" * 80)
