@@ -17,9 +17,10 @@ config_path = str(Path(__file__).parent.joinpath("config.yaml"))
 # ************* Create the AgentOS *************
 agent_os = AgentOS(
     description="Demo AgentOS",
-    agents=[agno_assist, web_search_agent],
-    teams=[reasoning_finance_team, multilingual_team],
-    workflows=[research_workflow, investment_workflow],
+    agents=[agno_assist, agno_assist2],
+    # agents=[agno_assist, agno_assist2, web_search_agent],
+    # teams=[reasoning_finance_team, multilingual_team],
+    # workflows=[research_workflow, investment_workflow],
     config=config_path,
 )
 # Get the FastAPI app for the AgentOS
